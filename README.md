@@ -20,5 +20,14 @@ Open `index.html` in any modern browser. No install or build step.
 | Magic candy (makes ghosts scared) | 50 |
 | Scared ghosts in a row | 200, 400, 800, 1600 |
 | Candy apple bonus | 100 and up, by level |
+| Magic star | 500, then Mega Teo |
+
+## Mega Teo
+
+A smiling magic star shows up every so often and twinkles for 10 seconds.
+Eat it and Teo grows into a giant rainbow-glowing pumpkin for 10 seconds
+(7 on Spooky). Mega Teo is faster and can't be caught. He hoovers up all
+the candy around him and gobbles any ghost he touches. A meter at the bottom
+shows how much Mega time is left.
 
 You get an extra life at 10,000 points. The high score is saved in your browser.

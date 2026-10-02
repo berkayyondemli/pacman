@@ -255,6 +255,9 @@ const Sound = (() => {
     woo() { tone(240, 0.28, 'sine', 0.08, 300); },
     eatGhost() { tone(160, 0.35, 'sawtooth', 0.16, 1400); tone(320, 0.35, 'square', 0.06, 2000); },
     death() { tone(760, 1.3, 'sawtooth', 0.14, 55); tone(780, 1.3, 'triangle', 0.12, 60); },
+    star() { [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.14, 'square', 0.12, null, i * 0.06)); },
+    megaTick(k) { const sc = [523, 659, 784, 659, 880, 784, 1047, 784]; tone(sc[k % sc.length], 0.12, 'triangle', 0.12); },
+    megaEnd() { [784, 659, 523, 392].forEach((f, i) => tone(f, 0.15, 'triangle', 0.14, null, i * 0.08)); },
     bonus() { [660, 880, 1175].forEach((f, i) => tone(f, 0.12, 'square', 0.12, null, i * 0.08)); },
     extra() { [N.A4, N.C5, N.F5, N.A5].forEach((f, i) => tone(f, 0.18, 'triangle', 0.2, null, i * 0.1)); },
     start() {
@@ -278,14 +281,14 @@ function makeCandyCorn() {
 }
 const CORN = makeCandyCorn();
 
-function drawPumpkin(c, x, y, dir, mouth, death, scale = 1) {
+function drawPumpkin(c, x, y, dir, mouth, death, scale = 1, glow = null) {
   const r = 9.5;
   c.save(); c.translate(x, y); c.scale(scale, scale);
   const ang = { right: 0, down: Math.PI / 2, left: 0, up: -Math.PI / 2 }[dir] || 0;
   c.rotate(ang); if (dir === 'left') c.scale(-1, 1);
   let a = 0.03 + mouth * 0.32 * Math.PI;
   if (death != null) a = 0.05 + death * Math.PI * 0.97;
-  c.shadowColor = '#ff9a1f'; c.shadowBlur = 12;
+  c.shadowColor = glow || '#ff9a1f'; c.shadowBlur = glow ? 18 : 12;
   const grd = c.createRadialGradient(-3, -3, 1, 0, 0, r);
   grd.addColorStop(0, '#ffb347'); grd.addColorStop(1, '#e8590c');
   c.fillStyle = grd;
@@ -372,6 +375,35 @@ function drawPower(c, x, y, t) {
   c.fillStyle = g; c.beginPath(); c.arc(0, 0, 5.5, 0, Math.PI * 2); c.fill();
   c.shadowBlur = 0; c.strokeStyle = 'rgba(255,255,255,0.7)'; c.lineWidth = 1.2;
   c.beginPath(); c.arc(0, 0, 3, -2.4, 0.4); c.stroke();
+  c.restore();
+}
+
+function drawStar(c, x, y, t, size = 1) {
+  c.save(); c.translate(x, y); c.rotate(Math.sin(t * 2) * 0.25);
+  const s = size * (1 + 0.12 * Math.sin(t * 7));
+  c.scale(s, s);
+  c.shadowColor = '#fff3a0'; c.shadowBlur = 16;
+  const g = c.createRadialGradient(-1, -2, 1, 0, 0, 10);
+  g.addColorStop(0, '#fffbe0'); g.addColorStop(0.5, '#ffe14d'); g.addColorStop(1, '#ffae00');
+  c.fillStyle = g;
+  c.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const an = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? 4.2 : 10;
+    k ? c.lineTo(Math.cos(an) * rr, Math.sin(an) * rr) : c.moveTo(Math.cos(an) * rr, Math.sin(an) * rr);
+  }
+  c.closePath(); c.fill(); c.shadowBlur = 0;
+  c.strokeStyle = '#b86b00'; c.lineWidth = 0.8; c.stroke();
+  c.fillStyle = '#5a2d00';
+  c.fillRect(-3, -2, 1.6, 2.4); c.fillRect(1.4, -2, 1.6, 2.4);
+  c.strokeStyle = '#5a2d00'; c.lineWidth = 1; c.beginPath(); c.arc(0, 1.5, 2.2, 0.2, Math.PI - 0.2); c.stroke();
+  c.restore();
+  // twinkles
+  c.save(); c.fillStyle = '#fff';
+  for (let k = 0; k < 3; k++) {
+    const an = t * 3 + k * 2.1, rr = 14 + 3 * Math.sin(t * 5 + k);
+    const a = 0.5 + 0.5 * Math.sin(t * 9 + k * 2);
+    c.globalAlpha = a; c.fillRect(x + Math.cos(an) * rr - 1, y + Math.sin(an) * rr - 1, 2, 2);
+  }
   c.restore();
 }
 
@@ -471,8 +503,13 @@ function buildMazes() {
 let diff = 'easy', state = 'title', paused = false;
 let level = 1, score = 0, lives = 0, hi = 0, dotsLeft = 0, dotsEaten = 0;
 let frightTimer = 0, modeIdx = 0, modeTimer = 0, levelTime = 0, stateTimer = 0, freeze = 0;
+let star = null, starTimer = 0, megaTimer = 0, megaTick = 0, megaCombo = 0;
 let ghostCombo = 0, bonus = null, popups = [], extraGiven = false, anim = 0, wooTimer = 0;
 const S = () => SETTINGS[diff];
+const STAR_TILES = [];
+for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (MAP[r][c] === '.' || MAP[r][c] === 'o') STAR_TILES.push([c, r]);
+const nextStarDelay = () => diff === 'easy' ? 18 + Math.random() * 10 : 28 + Math.random() * 12;
+const megaDuration = () => diff === 'easy' ? 10 : 7;
 try { hi = parseInt(localStorage.getItem('teo-pacman-hi') || '0', 10) || 0; } catch (e) { hi = 0; }
 function saveHi() { if (score > hi) { hi = score; } try { localStorage.setItem('teo-pacman-hi', String(hi)); } catch (e) { /* storage unavailable */ } }
 
@@ -486,6 +523,7 @@ function resetActors() {
       state: i === 0 ? 'active' : 'house', fright: false, releaseAt: S().release[i] });
   });
   frightTimer = 0; modeIdx = 0; modeTimer = 0; levelTime = 0; freeze = 0;
+  megaTimer = 0; star = null; starTimer = diff === 'easy' ? 12 : 18;
 }
 function newLevel() {
   grid = MAP.map(row => row.split(''));
@@ -525,10 +563,11 @@ function pacDecide(e) {
   const d = DV[e.dir];
   e.moving = pacOk(e.tx + d[0], e.ty + d[1]);
 }
-function pacArrive(e) {
-  const ch = grid[e.ty][e.tx];
+function pacArrive(e) { eatTile(e.tx, e.ty); }
+function eatTile(c, r) {
+  const ch = grid[r][c];
   if (ch === '.' || ch === 'o') {
-    grid[e.ty][e.tx] = ' '; dotsLeft--; dotsEaten++;
+    grid[r][c] = ' '; dotsLeft--; dotsEaten++;
     if (ch === '.') { addScore(10); Sound.chomp(); } else { addScore(50); power(); }
     if (dotsEaten === 70 || dotsEaten === 170) bonus = { t: 9, pts: BONUS_PTS[Math.min(level - 1, BONUS_PTS.length - 1)] };
     if (dotsLeft === 0) { state = 'clear'; stateTimer = 0; Sound.clear(); }
@@ -540,7 +579,7 @@ function addScore(n) {
   if (score > hi) hi = score;
 }
 function power() {
-  frightTimer = Math.max(S().fright - (level - 1) * 0.7, 2.5); ghostCombo = 0; wooTimer = 0;
+  frightTimer = Math.max(frightTimer, S().fright - (level - 1) * 0.7, 2.5); ghostCombo = 0; wooTimer = 0;
   ghosts.forEach(g => {
     if (g.state !== 'active') return;
     g.fright = true;
@@ -593,9 +632,39 @@ function ghostSpeed(g) {
   if (g.fright) return base * 0.55;
   return base;
 }
-const pacSpeed = () => S().pac * Math.min(1 + (level - 1) * 0.03, 1.2) * (frightTimer > 0 ? 1.08 : 1);
+const pacSpeed = () => S().pac * Math.min(1 + (level - 1) * 0.03, 1.2) * (megaTimer > 0 ? 1.2 : frightTimer > 0 ? 1.08 : 1);
 
 // ---------- Update ----------
+function updateStar(dt) {
+  if (megaTimer > 0) {
+    megaTimer -= dt; megaTick -= dt;
+    if (megaTick <= 0) { Sound.megaTick(Math.floor(anim * 4)); megaTick = 0.25; }
+    if (megaTimer <= 0) { megaTimer = 0; Sound.megaEnd(); }
+    return;
+  }
+  if (star) {
+    star.t -= dt;
+    const [px, py] = pos(pac);
+    let dx = Math.abs(px - star.x); if (dx > COLS / 2) dx = COLS - dx;
+    if (dx < 0.75 && Math.abs(py - star.y) < 0.75) {
+      star = null; starTimer = nextStarDelay();
+      megaTimer = megaDuration(); megaTick = 0; megaCombo = 0;
+      frightTimer = Math.max(frightTimer, megaTimer); ghostCombo = 0;
+      ghosts.forEach(g => { if (g.state === 'active') { g.fright = true; if (g.p > 0) reverseMid(g); else g.dir = OPP[g.dir]; } });
+      addScore(500); popups.push({ x: px, y: py - 1, text: 'MEGA TEO!', t: 1.8 });
+      Sound.star();
+    } else if (star.t <= 0) { star = null; starTimer = nextStarDelay(); }
+    return;
+  }
+  starTimer -= dt;
+  if (starTimer <= 0) {
+    const [px, py] = pos(pac);
+    const far = STAR_TILES.filter(([c, r]) => (c - px) ** 2 + (r - py) ** 2 > 64);
+    const [c, r] = far[Math.random() * far.length | 0];
+    star = { x: c, y: r, t: 10 };
+  }
+}
+
 function updatePlay(dt) {
   if (freeze > 0) { freeze -= dt; return; }
   levelTime += dt;
@@ -613,10 +682,20 @@ function updatePlay(dt) {
       }
     }
   }
+  updateStar(dt);
   if (pac.p > 0 && pac.next === OPP[pac.dir]) reverseMid(pac);
   move(pac, pacSpeed() * dt, pacDecide, pacArrive);
   if (pac.moving) pac.mouthT += dt * 16;
   if (state !== 'play') return;
+  if (megaTimer > 0) {
+    // Mega Teo hoovers up every treat within reach.
+    const [mx, my] = pos(pac);
+    for (let r = Math.floor(my - 2); r <= Math.ceil(my + 2); r++) for (let c = Math.floor(mx - 2); c <= Math.ceil(mx + 2); c++) {
+      if (r < 0 || r >= ROWS) continue;
+      const wc = wrapX(c);
+      if ((c - mx) ** 2 + (r - my) ** 2 <= 1.7 * 1.7) { eatTile(wc, r); if (state !== 'play') return; }
+    }
+  }
 
   ghosts.forEach((g, i) => {
     if (g.state === 'house') { if (levelTime >= g.releaseAt) g.state = 'leaving'; else return; }
@@ -628,8 +707,13 @@ function updatePlay(dt) {
     if (g.state !== 'active' && g.state !== 'leaving') continue;
     const [gx, gy] = pos(g);
     let dx = Math.abs(px - gx); if (dx > COLS / 2) dx = COLS - dx;
-    if (dx < 0.65 && Math.abs(py - gy) < 0.65) {
-      if (g.fright) {
+    const reach = megaTimer > 0 ? 1.5 : 0.65;
+    if (dx < reach && Math.abs(py - gy) < reach) {
+      if (megaTimer > 0) {
+        const pts = 200 * Math.pow(2, Math.min(megaCombo++, 3));
+        addScore(pts); popups.push({ x: gx, y: gy, text: String(pts), t: 1.1 });
+        g.state = 'eaten'; g.fright = false; freeze = 0.12; Sound.eatGhost();
+      } else if (g.fright) {
         const pts = 200 * Math.pow(2, ghostCombo++);
         addScore(pts); popups.push({ x: gx, y: gy, text: String(pts), t: 1.1 });
         g.state = 'eaten'; g.fright = false; freeze = 0.5; Sound.eatGhost();
@@ -707,6 +791,10 @@ function render() {
     else if (ch === 'o') drawPower(ctx, c * T + T / 2, r * T + T / 2, anim);
   }
   if (bonus) drawCandyApple(ctx, 13 * T + T / 2, 17 * T + T / 2 + Math.sin(anim * 4) * 1.5);
+  if (star && state === 'play') {
+    const blink = star.t < 2.5 && Math.floor(anim * 8) % 2 === 0;
+    if (!blink) drawStar(ctx, star.x * T + T / 2, star.y * T + T / 2, anim);
+  }
 
   const showGhosts = state !== 'clear' && state !== 'over' && !(state === 'dying' && stateTimer > 0.5);
   if (showGhosts) {
@@ -727,7 +815,14 @@ function render() {
     if (state === 'dying') death = stateTimer < 0.5 ? 0 : Math.min((stateTimer - 0.5) / 1.2, 1);
     if (!(death !== null && death >= 1) && state !== 'over') {
       const mouth = (state === 'play' && pac.moving) ? (Math.sin(pac.mouthT) + 1) / 2 : 0.45;
-      drawWrapped(px * T + T / 2, py * T + T / 2, (x, y) => drawPumpkin(ctx, x, y, death !== null ? 'up' : pac.dir, mouth, death));
+      let size = 1, glow = null;
+      if (megaTimer > 0 && death === null) {
+        const grow = Math.min(1, (megaDuration() - megaTimer) / 0.4), shrink = Math.min(1, megaTimer / 0.4);
+        size = 1 + 1.4 * Math.min(grow, shrink);
+        const ending = megaTimer < 2 && Math.floor(anim * 8) % 2 === 0;
+        glow = ending ? '#ffffff' : `hsl(${(anim * 300) % 360}, 100%, 60%)`;
+      }
+      drawWrapped(px * T + T / 2, py * T + T / 2, (x, y) => drawPumpkin(ctx, x, y, death !== null ? 'up' : pac.dir, mouth, death, size, glow));
     }
   }
 
@@ -748,6 +843,12 @@ function render() {
   const by = HUD_TOP + H + HUD_BOT / 2;
   if (state !== 'title') for (let k = 0; k < Math.min(lives - 1, 8); k++) drawPumpkin(ctx, 22 + k * 24, by, 'right', 0.4, null, 0.75);
   for (let k = 0; k < Math.min(level, 7); k++) drawCandyApple(ctx, CW - 20 - k * 22, by + 2);
+  if (megaTimer > 0) {
+    drawStar(ctx, CW / 2 - 70, by, anim, 0.8);
+    ctx.fillStyle = '#3b1257'; ctx.fillRect(CW / 2 - 52, by - 5, 120, 10);
+    ctx.fillStyle = `hsl(${(anim * 300) % 360}, 100%, 60%)`;
+    ctx.fillRect(CW / 2 - 52, by - 5, 120 * (megaTimer / megaDuration()), 10);
+  }
 }
 
 // ---------- Overlay ----------
@@ -767,6 +868,7 @@ function showStart() {
         <li data-icon="corn">Candy corn: 10 points each.</li>
         <li data-icon="power">Magic candy makes the ghosts scared. Then you can gobble them!</li>
         <li data-icon="ghost">Vlad, Bubbles, Slimy and Hazel. Don't let them catch you!</li>
+        <li data-icon="star">A magic star appears now and then. Eat it to become MEGA TEO and gobble everything!</li>
         <li data-icon="apple">A candy apple sometimes appears. Grab it for bonus points.</li>
       </ul>
       <div class="buttons">
@@ -804,6 +906,7 @@ function addIcons() {
     power: (g, x, y) => drawPower(g, x, y - 2, 0),
     ghost: (g, x, y) => drawGhost(g, x, y + 1, { color: GDEF[3].color, kind: 3, dir: 'right', t: 0 }),
     apple: (g, x, y) => drawCandyApple(g, x, y),
+    star: (g, x, y) => drawStar(g, x, y - 2, 0, 0.9),
   };
   overlay.querySelectorAll('[data-icon]').forEach(li => li.prepend(iconCanvas(draws[li.dataset.icon])));
 }
@@ -860,7 +963,7 @@ requestAnimationFrame(frame);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { buildMazes(); fit(); });
 
 // Small hook for automated checks.
-window.__pacman = { get state() { return state; }, get score() { return score; }, get lives() { return lives; }, get dotsLeft() { return dotsLeft; }, pac, ghosts, startGame, setDir };
+window.__pacman = { get state() { return state; }, get score() { return score; }, get lives() { return lives; }, get dotsLeft() { return dotsLeft; }, get mega() { return megaTimer; }, get star() { return star; }, forceStar() { starTimer = 0; }, pac, ghosts, startGame, setDir };
 })();
 </script>
 <!--ARTIFACT-END-->
